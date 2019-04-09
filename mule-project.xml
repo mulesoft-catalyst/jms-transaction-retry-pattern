@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<mule-project xmlns="http://www.mulesoft.com/tooling/project" runtimeId="org.mule.tooling.server.3.9.1.ee" schemaVersion="5.3.0.0">
+    <name>jms-transaction-pattern</name>
+    <description></description>
+    <muleExtension name="Secure Property Placeholder" qualifier="org.mule.tooling.ui.contribution.secure-property-placeholder.3.8.1"/>
+    <muleExtension name="Mule Requester" qualifier="org.mule.tooling.ui.contribution.mulerequester.3.5.0"/>
+</mule-project>

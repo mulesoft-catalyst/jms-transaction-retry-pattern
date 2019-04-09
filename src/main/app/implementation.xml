@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:mulerequester="http://www.mulesoft.org/schema/mule/mulerequester"
+	xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking"
+	xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/mulerequester http://www.mulesoft.org/schema/mule/mulerequester/current/mule-mulerequester.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd">
+	<flow name="put-jms-message-to-queue-implementation-flow">
+        <poll doc:name="Poll">
+            <fixed-frequency-scheduler frequency="${jms.dql.poller.frequency}" timeUnit="HOURS"/>
+            <logger message="#[&quot;Start flow -- insert message into queue&quot;]" level="INFO" doc:name="Logger"/>
+        </poll>
+		<dw:transform-message doc:name="Build JMS message">
+			<dw:input-payload mimeType="application/json" />
+			<dw:set-payload resource="classpath:dw/jms/build-payload.dwl" />
+		</dw:transform-message>
+		<set-payload value="#[message.payloadAs(java.lang.String)]"
+			doc:name="Set Payload as string" />
+		<jms:outbound-endpoint queue="${jms.queue}"
+			 doc:name="JMS - Insert message in queue" connector-ref="activemq"/>
+	</flow>
+	<flow name="read-jms-message-implementation-flow">
+		<jms:inbound-endpoint queue="${jms.queue}"
+			connector-ref="activemq" doc:name="JMS - Get message from queue">
+			<idempotent-redelivery-policy
+				idExpression="#[message.inboundProperties['JMSMessageID']]" />
+			<jms:transaction action="ALWAYS_BEGIN" />
+		</jms:inbound-endpoint>
+		<logger
+			message="The message has been obtained successfully from the JMS queue"
+			level="INFO" doc:name="Log successfully obtained message" />
+		<logger message="#[message.payloadAs(java.lang.String)]" level="INFO"
+			doc:name="Log payload" />
+		<scripting:component doc:name="Script - Throw exception to make the message to fail">
+			<scripting:script engine="Groovy"><![CDATA[
+        throw new IllegalArgumentException('Ilegal argument message')
+    ]]></scripting:script>
+		</scripting:component>
+		<rollback-exception-strategy doc:name="Rollback Exception Strategy"
+			maxRedeliveryAttempts="${jms.redelivery.attempts}">
+			<logger
+				message="The message could not be processed successfully, so it will be reprocessed."
+				level="INFO" doc:name="Logger" />
+			<on-redelivery-attempts-exceeded>
+				<jms:outbound-endpoint queue="${jms.dlq}"
+					connector-ref="activemq" doc:name="JMS - Backup message in individual DLQ" />
+			</on-redelivery-attempts-exceeded>
+		</rollback-exception-strategy>
+	</flow>
+	<flow name="dead-letter-queue-implementation-flow">
+		<poll doc:name="Poll">
+			<fixed-frequency-scheduler frequency="${jms.dql.poller.frequency}"
+				timeUnit="HOURS" />
+			<logger message="Checking messages from DQL" level="DEBUG"
+				doc:name="Logger" />
+		</poll>
+		<mulerequester:request resource="jms://${jms.dlq}"
+			doc:name="Mule Requester - Get from JMS DLQ" />
+		<foreach collection="#[payload]" doc:name="For Each">
+			<jms:outbound-endpoint queue="${jms.queue}"
+				connector-ref="activemq" doc:name="JMS - Reinsert message in original queue" />
+		</foreach>
+	</flow>
+</mule>
